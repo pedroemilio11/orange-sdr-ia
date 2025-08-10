@@ -1,0 +1,327 @@
+{
+  "name": "Orange SDR IA - Conversacional Pro [CORRIGIDO]",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "orange-sdr-conversacional-pro",
+        "options": {}
+      },
+      "id": "webhook_trigger",
+      "name": "Webhook Chatwoot",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 1,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Validação e Extração de Dados do Webhook\nconst payload = items[0].json;\n\nif (!payload.content || !payload.conversation || !payload.sender) {\n  throw new Error('Payload inválido do Chatwoot');\n}\n\n// Extrair informações essenciais\nconst messageData = {\n  mensagem: payload.content,\n  conversationId: payload.conversation.id,\n  contactId: payload.sender?.id || payload.conversation.contact_inbox.contact_id,\n  contactPhone: payload.sender?.phone_number || payload.sender?.identifier || 'Não informado',\n  contactName: payload.sender?.name || 'Cliente',\n  accountId: payload.account?.id || 2,\n  timestamp: new Date().toISOString()\n};\n\nreturn [{json: messageData}];"
+      },
+      "id": "process_webhook",
+      "name": "Processar Webhook",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "operation": "get",
+        "propertyName": "context",
+        "key": "={{ $json.conversationId }}",
+        "options": {
+          "ttl": 86400
+        }
+      },
+      "id": "get_context",
+      "name": "Buscar Contexto Redis",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "model": "gpt-4o",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "=Você é Ora, assistente virtual especialista em imóveis da Orange Incorporadora. Sua missão é atender leads interessados em nossos empreendimentos CasasMar, qualificar e coletar dados importantes de forma natural e conversacional.\n\n## Personalidade\n- Profissional mas amigável\n- Proativo e prestativo\n- Empático e paciente\n- Objetivo mas não robótico\n- Use emojis moderadamente (🏠 🔑 💰 📍 ✨)\n\n## Empreendimentos\n\n### CasasMar Farol\n- 💰 Valor: R$ 179.900\n- 📍 Localização: Bairro Farol, Parnaíba-PI\n- 🏠 2 quartos (1 suíte)\n- 📐 50m² de área construída\n- 🚗 1 vaga de garagem\n- 📅 Entrega: Dezembro/2026\n- ✨ Diferenciais: Próximo ao centro, área de lazer completa\n\n### CasasMar Coral\n- 💰 Valor: R$ 149.900\n- 📍 Localização: Bairro Coral, Parnaíba-PI\n- 🏠 2 quartos\n- 📐 45m² de área construída\n- 🚗 1 vaga de garagem\n- 📅 Entrega: Dezembro/2026\n- ✨ Diferenciais: Melhor custo-benefício, localização estratégica\n\n## Objetivo Principal\nColetar de forma natural durante a conversa:\n1. Nome completo\n2. CPF\n3. Telefone/WhatsApp\n4. Email\n5. Renda familiar\n6. Valor disponível para entrada\n7. Urgência da compra\n8. Se já visitou o estande\n\n## Formato de Resposta\nSempre retorne um JSON com:\n```json\n{\n  \"resposta\": \"Sua mensagem para o cliente\",\n  \"dados_coletados\": {\n    \"nome\": \"valor ou null\",\n    \"cpf\": \"valor ou null\",\n    \"telefone\": \"valor ou null\",\n    \"email\": \"valor ou null\",\n    \"renda\": \"valor ou null\",\n    \"entrada\": \"valor ou null\",\n    \"urgencia\": \"alta/media/baixa ou null\",\n    \"visitou_estande\": \"sim/nao ou null\"\n  },\n  \"lead_score\": 0-100,\n  \"proxima_acao\": \"agendar_visita/enviar_proposta/qualificar_mais/sem_interesse\"\n}\n```\n\n## Contexto\nVocê tem acesso ao histórico completo da conversa. Use-o para:\n- Não repetir perguntas já respondidas\n- Manter continuidade\n- Lembrar preferências mencionadas\n- Construir relacionamento"
+            },
+            {
+              "role": "user",
+              "content": "=Contexto da conversa:\\n{{ $json.context || 'Primeira interação' }}\\n\\nMensagem atual do cliente: {{ $json.mensagem }}\\n\\nDados já coletados: {{ $json.dadosColetados || '{}' }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7,
+          "maxTokens": 2000,
+          "topP": 1,
+          "frequencyPenalty": 0,
+          "presencePenalty": 0,
+          "responseFormat": {
+            "type": "json_object"
+          }
+        }
+      },
+      "id": "openai_chat",
+      "name": "OpenAI GPT-4o",
+      "type": "@n8n/n8n-nodes-langchain.lmChatOpenAi",
+      "typeVersion": 1,
+      "position": [850, 300],
+      "credentials": {
+        "openAiApi": {
+          "id": "1",
+          "name": "OpenAI API"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "functionCode": "// Processar resposta da IA\ntry {\n  const aiResponse = JSON.parse(items[0].json.response);\n  \n  // Extrair dados da resposta\n  const resposta = aiResponse.resposta;\n  const dadosColetados = aiResponse.dados_coletados || {};\n  const leadScore = aiResponse.lead_score || 0;\n  const proximaAcao = aiResponse.proxima_acao || 'qualificar_mais';\n  \n  // Preparar dados para próximos nodes\n  return [{\n    json: {\n      resposta,\n      dadosColetados,\n      leadScore,\n      proximaAcao,\n      conversationId: items[0].json.conversationId,\n      contactId: items[0].json.contactId,\n      timestamp: new Date().toISOString()\n    }\n  }];\n} catch (error) {\n  // Fallback em caso de erro\n  return [{\n    json: {\n      resposta: 'Desculpe, tive um problema técnico. Pode repetir sua mensagem?',\n      dadosColetados: {},\n      leadScore: 0,\n      proximaAcao: 'retry',\n      error: error.message\n    }\n  }];\n}"
+      },
+      "id": "process_ai_response",
+      "name": "Processar Resposta IA",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1050, 300]
+    },
+    {
+      "parameters": {
+        "operation": "set",
+        "key": "={{ $json.conversationId }}",
+        "value": "={{ JSON.stringify($json) }}",
+        "options": {
+          "ttl": 86400
+        }
+      },
+      "id": "update_context",
+      "name": "Atualizar Contexto Redis",
+      "type": "n8n-nodes-base.redis",
+      "typeVersion": 1,
+      "position": [1250, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://chatwoot.construtoraorange.com.br/api/v1/accounts/2/conversations/{{ $json.conversationId }}/messages",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "yRp7ZhBRRN6gWJYFMxqbSs8A"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.resposta }}"
+            },
+            {
+              "name": "message_type",
+              "value": "outgoing"
+            },
+            {
+              "name": "private",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "send_chatwoot",
+      "name": "Enviar para Chatwoot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1450, 300]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.leadScore }}",
+              "operation": "largerEqual",
+              "value2": 60
+            }
+          ]
+        }
+      },
+      "id": "check_qualified",
+      "name": "Lead Qualificado?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://orange.cvcrm.com.br/api/cvio/lead",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "token",
+              "value": "d3d9446802a44259755d38e6d163e820"
+            },
+            {
+              "name": "email",
+              "value": "pedroemilio@orange.cnt.br"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "nome",
+              "value": "={{ $json.dadosColetados.nome || 'Lead WhatsApp' }}"
+            },
+            {
+              "name": "cpf",
+              "value": "={{ $json.dadosColetados.cpf }}"
+            },
+            {
+              "name": "telefone",
+              "value": "={{ $json.dadosColetados.telefone }}"
+            },
+            {
+              "name": "email",
+              "value": "={{ $json.dadosColetados.email }}"
+            },
+            {
+              "name": "origem",
+              "value": "WhatsApp IA"
+            },
+            {
+              "name": "empreendimento",
+              "value": "CasasMar"
+            },
+            {
+              "name": "observacoes",
+              "value": "=Lead Score: {{ $json.leadScore }}\\nRenda: {{ $json.dadosColetados.renda }}\\nEntrada: {{ $json.dadosColetados.entrada }}\\nUrgência: {{ $json.dadosColetados.urgencia }}"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "send_crm",
+      "name": "Enviar para CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1850, 200]
+    },
+    {
+      "parameters": {
+        "url": "https://evolution.construtoraorange.com.br/message/sendText/orange-ia",
+        "method": "POST",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "seu_token_evolution"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "number",
+              "value": "5586999846223"
+            },
+            {
+              "name": "text",
+              "value": "=🔔 *NOVO LEAD QUALIFICADO*\\n\\n👤 *Nome:* {{ $json.dadosColetados.nome }}\\n📱 *Telefone:* {{ $json.dadosColetados.telefone }}\\n💰 *Renda:* {{ $json.dadosColetados.renda }}\\n💵 *Entrada:* {{ $json.dadosColetados.entrada }}\\n🎯 *Score:* {{ $json.leadScore }}/100\\n⚡ *Urgência:* {{ $json.dadosColetados.urgencia }}\\n\\n📋 *Próxima Ação:* {{ $json.proximaAcao }}"
+            }
+          ]
+        }
+      },
+      "id": "notify_whatsapp",
+      "name": "Notificar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 3,
+      "position": [1850, 400]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Log de erro e métricas\nconst errorData = {\n  timestamp: new Date().toISOString(),\n  error: items[0].json.error || 'Unknown error',\n  conversationId: items[0].json.conversationId,\n  node: items[0].json.failedNode || 'unknown'\n};\n\nconsole.error('Workflow Error:', errorData);\n\n// Salvar log de erro para análise\nreturn [{json: errorData}];"
+      },
+      "id": "error_handler",
+      "name": "Tratamento de Erros",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [1450, 500]
+    },
+    {
+      "parameters": {
+        "functionCode": "// Coletar métricas do workflow\nconst metrics = {\n  timestamp: new Date().toISOString(),\n  conversationId: items[0].json.conversationId,\n  leadScore: items[0].json.leadScore || 0,\n  dadosColetados: Object.keys(items[0].json.dadosColetados || {}).filter(k => items[0].json.dadosColetados[k]).length,\n  tempoResposta: Date.now() - new Date(items[0].json.timestamp).getTime(),\n  sucesso: true\n};\n\nconsole.log('Metrics:', metrics);\n\nreturn [{json: metrics}];"
+      },
+      "id": "collect_metrics",
+      "name": "Coletar Métricas",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 1,
+      "position": [2050, 300]
+    }
+  ],
+  "connections": {
+    "webhook_trigger": {
+      "main": [[{"node": "process_webhook", "type": "main", "index": 0}]]
+    },
+    "process_webhook": {
+      "main": [[{"node": "get_context", "type": "main", "index": 0}]]
+    },
+    "get_context": {
+      "main": [[{"node": "openai_chat", "type": "main", "index": 0}]]
+    },
+    "openai_chat": {
+      "main": [[{"node": "process_ai_response", "type": "main", "index": 0}]]
+    },
+    "process_ai_response": {
+      "main": [[{"node": "update_context", "type": "main", "index": 0}]]
+    },
+    "update_context": {
+      "main": [[{"node": "send_chatwoot", "type": "main", "index": 0}]]
+    },
+    "send_chatwoot": {
+      "main": [[{"node": "check_qualified", "type": "main", "index": 0}]]
+    },
+    "check_qualified": {
+      "main": [
+        [{"node": "send_crm", "type": "main", "index": 0}],
+        [{"node": "collect_metrics", "type": "main", "index": 0}]
+      ]
+    },
+    "send_crm": {
+      "main": [[{"node": "notify_whatsapp", "type": "main", "index": 0}]]
+    },
+    "notify_whatsapp": {
+      "main": [[{"node": "collect_metrics", "type": "main", "index": 0}]]
+    }
+  },
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "saveDataSuccessExecution": "all",
+    "saveExecutionProgress": true,
+    "errorWorkflow": "error_handler"
+  },
+  "staticData": null,
+  "tags": ["production", "sdr", "ai", "chatwoot"],
+  "updatedAt": "2025-08-10T01:00:00.000Z",
+  "versionId": "v2.0"
+}
