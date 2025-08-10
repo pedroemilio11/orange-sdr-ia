@@ -1,0 +1,374 @@
+{
+  "name": "Orange SDR IA - COMPLETO E FUNCIONAL",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "orange-sdr-ia-pro",
+        "options": {
+          "responseData": "allEntries",
+          "responsePropertyName": "data"
+        }
+      },
+      "id": "webhook_trigger",
+      "name": "📥 Webhook Chatwoot",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 400]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Validar e processar webhook do Chatwoot\nconst webhook = $input.first().json;\n\n// Log para debug\nconsole.log('Webhook recebido:', webhook.event);\n\n// Filtrar apenas mensagens de clientes\nif (webhook.event !== 'message_created') {\n  return [];\n}\n\nif (webhook.message?.sender?.type !== 'contact') {\n  return [];\n}\n\n// Extrair dados essenciais\nconst output = {\n  // IDs importantes\n  conversationId: webhook.conversation?.id,\n  contactId: webhook.contact?.id,\n  messageId: webhook.message?.id,\n  accountId: webhook.account?.id || 2,\n  \n  // Dados do contato\n  contactName: webhook.contact?.name || 'Cliente',\n  contactPhone: webhook.contact?.phone_number || webhook.contact?.phone || null,\n  contactEmail: webhook.contact?.email || null,\n  \n  // Mensagem\n  messageContent: webhook.message?.content || '',\n  \n  // Timestamp\n  timestamp: new Date().toISOString()\n};\n\nreturn [output];"
+      },
+      "id": "process_webhook",
+      "name": "🔄 Processar Webhook",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 400]
+    },
+    {
+      "parameters": {
+        "content": "## 📊 Gerenciar Contexto\nMantém histórico e dados coletados",
+        "height": 80,
+        "width": 200
+      },
+      "id": "note_context",
+      "name": "Sticky Note",
+      "type": "n8n-nodes-base.stickyNote",
+      "typeVersion": 1,
+      "position": [620, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Sistema de memória/contexto da conversa\nconst input = $input.first().json;\n\n// Inicializar ou recuperar contexto\nlet contexto = {\n  conversationId: input.conversationId,\n  contactId: input.contactId,\n  \n  // Dados que precisamos coletar\n  dadosColetados: {\n    nome: input.contactName !== 'Cliente' ? input.contactName : null,\n    cpf: null,\n    telefone: input.contactPhone,\n    email: input.contactEmail,\n    renda: null,\n    entrada: null\n  },\n  \n  // Histórico de mensagens (máximo 10)\n  historico: [],\n  \n  // Controle de etapa\n  etapaAtual: 'saudacao',\n  dadosCompletos: false,\n  \n  // Timestamps\n  createdAt: new Date().toISOString(),\n  updatedAt: new Date().toISOString()\n};\n\n// Recuperar contexto anterior se existir (simulado via variável estática)\n// Em produção, buscar do banco de dados\nconst contextKey = `context_${input.conversationId}`;\nif ($vars[contextKey]) {\n  contexto = {\n    ...$vars[contextKey],\n    updatedAt: new Date().toISOString()\n  };\n}\n\n// Adicionar mensagem atual ao histórico\ncontexto.historico.push({\n  tipo: 'cliente',\n  conteudo: input.messageContent,\n  timestamp: input.timestamp\n});\n\n// Manter apenas últimas 10 mensagens\nif (contexto.historico.length > 10) {\n  contexto.historico = contexto.historico.slice(-10);\n}\n\n// Analisar mensagem para extrair dados automaticamente\nconst mensagem = input.messageContent.toLowerCase();\n\n// Extrair CPF (formato: xxx.xxx.xxx-xx ou xxxxxxxxxxx)\nconst cpfMatch = mensagem.match(/\\d{3}\\.?\\d{3}\\.?\\d{3}-?\\d{2}/);\nif (cpfMatch && !contexto.dadosColetados.cpf) {\n  contexto.dadosColetados.cpf = cpfMatch[0];\n}\n\n// Extrair telefone (formato: (xx) xxxxx-xxxx ou similar)\nconst phoneMatch = mensagem.match(/\\(?\\d{2}\\)?\\s?\\d{4,5}-?\\d{4}/);\nif (phoneMatch && !contexto.dadosColetados.telefone) {\n  contexto.dadosColetados.telefone = phoneMatch[0];\n}\n\n// Extrair valores monetários para renda/entrada\nconst valorMatch = mensagem.match(/r\\$\\s?([\\d\\.]+(?:,\\d{2})?)|([\\d\\.]+(?:,\\d{2})?)\\s?(?:reais|mil)/gi);\nif (valorMatch) {\n  // Contexto: se mencionou \"renda\" ou \"ganho\" ou \"salário\"\n  if (mensagem.includes('renda') || mensagem.includes('ganho') || mensagem.includes('salário')) {\n    contexto.dadosColetados.renda = valorMatch[0];\n  }\n  // Contexto: se mencionou \"entrada\" ou \"dar\" ou \"pagar\"\n  if (mensagem.includes('entrada') || mensagem.includes('dar') || mensagem.includes('pagar')) {\n    contexto.dadosColetados.entrada = valorMatch[0];\n  }\n}\n\n// Atualizar etapa baseado nos dados coletados\nconst dados = contexto.dadosColetados;\nif (!dados.nome) {\n  contexto.etapaAtual = 'coletar_nome';\n} else if (!dados.cpf) {\n  contexto.etapaAtual = 'coletar_cpf';\n} else if (!dados.telefone) {\n  contexto.etapaAtual = 'coletar_telefone';\n} else if (!dados.renda) {\n  contexto.etapaAtual = 'coletar_renda';\n} else if (!dados.entrada) {\n  contexto.etapaAtual = 'coletar_entrada';\n} else {\n  contexto.etapaAtual = 'finalizar';\n  contexto.dadosCompletos = true;\n}\n\n// Salvar contexto atualizado\n$vars[contextKey] = contexto;\n\n// Retornar dados processados\nreturn [{\n  ...input,\n  contexto,\n  proximaAcao: contexto.dadosCompletos ? 'cadastrar_crm' : 'continuar_conversa'\n}];"
+      },
+      "id": "context_manager",
+      "name": "🧠 Gerenciar Contexto",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [650, 400]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4-turbo-preview",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Você é Ora, assistente virtual da Orange Incorporadora em Parnaíba-PI.\n\n🏠 EMPREENDIMENTOS:\n• CasasMar Farol: R$ 179.900 (Bairro Farol)\n• CasasMar Coral: R$ 149.900 (Bairro Coral)\n• Conclusão: Dezembro/2026\n• Site: casasmar.com.br\n\n📋 OBJETIVO:\nColetar naturalmente durante a conversa:\n1. Nome completo\n2. CPF (para análise de crédito)\n3. Telefone\n4. Renda mensal\n5. Valor de entrada disponível\n\n💬 PERSONALIDADE:\n• Simpática e acolhedora\n• Profissional mas descontraída\n• Nunca insistente\n• Responde todas as dúvidas\n• Foco em ajudar, não em vender\n\n⚡ REGRAS:\n• Mantenha conversa natural\n• Não force coleta de dados\n• Se cliente resistir, continue normalmente\n• Apresente benefícios quando apropriado\n• Use emojis com moderação\n• Máximo 3 parágrafos por resposta"
+            },
+            {
+              "role": "assistant",
+              "content": "Contexto da conversa até agora:\n{{ $json.contexto.historico.slice(-3).map(h => h.tipo + ': ' + h.conteudo).join('\\n') }}"
+            },
+            {
+              "role": "user",
+              "content": "Cliente disse: \"{{ $json.messageContent }}\"\n\nDados já coletados:\n• Nome: {{ $json.contexto.dadosColetados.nome || 'não informado' }}\n• CPF: {{ $json.contexto.dadosColetados.cpf || 'não informado' }}\n• Telefone: {{ $json.contexto.dadosColetados.telefone || 'não informado' }}\n• Renda: {{ $json.contexto.dadosColetados.renda || 'não informado' }}\n• Entrada: {{ $json.contexto.dadosColetados.entrada || 'não informado' }}\n\nEtapa atual: {{ $json.contexto.etapaAtual }}\n\nResponda naturalmente e, se apropriado, tente coletar o próximo dado faltante."
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.8,
+          "maxTokens": 400
+        }
+      },
+      "id": "openai_chat",
+      "name": "🤖 IA Ora Responde",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [850, 400],
+      "credentials": {
+        "openAiApi": {
+          "id": "1",
+          "name": "OpenAI"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "jsCode": "// Preparar resposta e atualizar histórico\nconst input = $input.first().json;\nconst resposta = input.message?.content || input.text || 'Desculpe, não consegui processar sua mensagem.';\n\n// Adicionar resposta ao histórico\nconst contextKey = `context_${input.conversationId}`;\nif ($vars[contextKey]) {\n  $vars[contextKey].historico.push({\n    tipo: 'assistente',\n    conteudo: resposta,\n    timestamp: new Date().toISOString()\n  });\n}\n\nreturn [{\n  ...input,\n  respostaIA: resposta,\n  conversationId: input.conversationId,\n  accountId: input.accountId || 2\n}];"
+      },
+      "id": "prepare_response",
+      "name": "📝 Preparar Resposta",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1050, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://api.chatwoot.com/api/v1/accounts/{{ $json.accountId }}/conversations/{{ $json.conversationId }}/messages",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "u3b1Q2k8r4V7MZtCpUCrUzwH"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.respostaIA }}"
+            },
+            {
+              "name": "message_type",
+              "value": "outgoing"
+            },
+            {
+              "name": "private",
+              "value": "=false"
+            }
+          ]
+        },
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "send_chatwoot",
+      "name": "💬 Enviar para Chatwoot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1250, 400]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": false,
+            "leftValue": "",
+            "typeValidation": "loose"
+          },
+          "conditions": [
+            {
+              "leftValue": "={{ $json.contexto.dadosCompletos }}",
+              "rightValue": "=true",
+              "operator": {
+                "type": "boolean",
+                "operation": "true"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "id": "check_complete",
+      "name": "✅ Dados Completos?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2,
+      "position": [1450, 400]
+    },
+    {
+      "parameters": {
+        "url": "https://orange.cvcrm.com.br/api/cvio/lead",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "email",
+              "value": "pedroemilio@orange.cnt.br"
+            },
+            {
+              "name": "token",
+              "value": "814d24bb2bce6a34e86785e88fdff9bdf1d7bed4"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"nome\": \"{{ $json.contexto.dadosColetados.nome }}\",\n  \"cpf\": \"{{ $json.contexto.dadosColetados.cpf }}\",\n  \"telefone\": \"{{ $json.contexto.dadosColetados.telefone }}\",\n  \"email\": \"{{ $json.contexto.dadosColetados.email || 'nao.informado@orange.com.br' }}\",\n  \"renda\": \"{{ $json.contexto.dadosColetados.renda }}\",\n  \"entrada\": \"{{ $json.contexto.dadosColetados.entrada }}\",\n  \"origem\": \"WhatsApp - Ora IA\",\n  \"empreendimento\": \"CasasMar\",\n  \"observacoes\": \"Lead qualificado automaticamente pela IA Ora.\\nRenda: {{ $json.contexto.dadosColetados.renda }}\\nEntrada: {{ $json.contexto.dadosColetados.entrada }}\"\n}",
+        "options": {
+          "timeout": 15000
+        }
+      },
+      "id": "cadastrar_cvcrm",
+      "name": "🏢 Cadastrar CV CRM",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [1650, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Gerar resumo para WhatsApp\nconst dados = $json.contexto.dadosColetados;\n\nconst resumo = `🎯 *NOVO LEAD QUALIFICADO*\n\n👤 *Nome:* ${dados.nome}\n📱 *Telefone:* ${dados.telefone}\n📄 *CPF:* ${dados.cpf}\n💰 *Renda:* ${dados.renda}\n💵 *Entrada:* ${dados.entrada}\n\n🏠 *Interesse:* CasasMar\n🤖 *Atendido por:* Ora IA\n⏰ *Data/Hora:* ${new Date().toLocaleString('pt-BR')}\n\n✅ Lead cadastrado no CV CRM com sucesso!`;\n\nreturn [{\n  ...input,\n  resumoWhatsApp: resumo,\n  numeroDestino: '5586999846223'\n}];"
+      },
+      "id": "gerar_resumo",
+      "name": "📊 Gerar Resumo",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [1850, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://evolution.construtoraorange.com.br/message/sendText/orange-ia",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "apikey",
+              "value": "B6D711FCDE4D4FD5936544120E713976"
+            }
+          ]
+        },
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "{\n  \"number\": \"{{ $json.numeroDestino }}\",\n  \"text\": \"{{ $json.resumoWhatsApp }}\"\n}",
+        "options": {
+          "timeout": 10000
+        }
+      },
+      "id": "enviar_whatsapp",
+      "name": "📱 Enviar WhatsApp",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [2050, 300]
+    }
+  ],
+  "connections": {
+    "webhook_trigger": {
+      "main": [
+        [
+          {
+            "node": "process_webhook",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "process_webhook": {
+      "main": [
+        [
+          {
+            "node": "context_manager",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "context_manager": {
+      "main": [
+        [
+          {
+            "node": "openai_chat",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "openai_chat": {
+      "main": [
+        [
+          {
+            "node": "prepare_response",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "prepare_response": {
+      "main": [
+        [
+          {
+            "node": "send_chatwoot",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "send_chatwoot": {
+      "main": [
+        [
+          {
+            "node": "check_complete",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "check_complete": {
+      "main": [
+        [
+          {
+            "node": "cadastrar_cvcrm",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        [
+          {
+            "node": "webhook_trigger",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "cadastrar_cvcrm": {
+      "main": [
+        [
+          {
+            "node": "gerar_resumo",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "gerar_resumo": {
+      "main": [
+        [
+          {
+            "node": "enviar_whatsapp",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1",
+    "saveManualExecutions": true,
+    "callerPolicy": "workflowsFromSameOwner",
+    "errorWorkflow": ""
+  },
+  "versionId": "2.0",
+  "meta": {
+    "instanceId": "orange-sdr-ia-pro"
+  },
+  "id": "orange_sdr_ia_v2",
+  "tags": [
+    {
+      "name": "Orange",
+      "createdAt": "2025-01-09"
+    },
+    {
+      "name": "IA",
+      "createdAt": "2025-01-09"
+    },
+    {
+      "name": "Produção",
+      "createdAt": "2025-01-09"
+    }
+  ]
+}

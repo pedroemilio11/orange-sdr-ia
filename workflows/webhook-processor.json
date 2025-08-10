@@ -1,0 +1,139 @@
+{
+  "name": "Orange SDR IA - FUNCIONAL",
+  "nodes": [
+    {
+      "parameters": {
+        "httpMethod": "POST",
+        "path": "orange-sdr-ia",
+        "options": {}
+      },
+      "id": "webhook",
+      "name": "Webhook Chatwoot",
+      "type": "n8n-nodes-base.webhook",
+      "typeVersion": 2,
+      "position": [250, 300]
+    },
+    {
+      "parameters": {
+        "jsCode": "// Extrair dados do webhook\nconst data = $input.first().json;\n\n// Verificar se é mensagem do cliente\nif (data.event !== 'message_created' || data.message?.sender?.type !== 'contact') {\n  return [];\n}\n\nreturn [{\n  conversationId: data.conversation?.id,\n  contactName: data.contact?.name || 'Cliente',\n  contactPhone: data.contact?.phone_number || data.contact?.phone,\n  messageContent: data.message?.content || '',\n  accountId: data.account?.id || 2\n}];"
+      },
+      "id": "processar",
+      "name": "Processar Mensagem",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [450, 300]
+    },
+    {
+      "parameters": {
+        "resource": "chat",
+        "operation": "message",
+        "model": "gpt-4-turbo-preview",
+        "messages": {
+          "values": [
+            {
+              "role": "system",
+              "content": "Você é Ora, assistente da Orange Incorporadora.\n\nOFERTAS:\n- CasasMar Farol: R$ 179.900\n- CasasMar Coral: R$ 149.900\n\nCOLETE (naturalmente):\n1. Nome\n2. CPF\n3. Telefone\n4. Renda\n5. Entrada\n\nSeja simpática e natural!"
+            },
+            {
+              "role": "user",
+              "content": "={{ $json.messageContent }}"
+            }
+          ]
+        },
+        "options": {
+          "temperature": 0.7
+        }
+      },
+      "id": "openai",
+      "name": "IA Responde",
+      "type": "@n8n/n8n-nodes-langchain.openAi",
+      "typeVersion": 1.4,
+      "position": [650, 300]
+    },
+    {
+      "parameters": {
+        "url": "https://api.chatwoot.com/api/v1/accounts/2/conversations/={{ $node[\"processar\"].json[\"conversationId\"] }}/messages",
+        "method": "POST",
+        "authentication": "genericCredentialType",
+        "genericAuthType": "httpHeaderAuth",
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "api_access_token",
+              "value": "u3b1Q2k8r4V7MZtCpUCrUzwH"
+            }
+          ]
+        },
+        "sendBody": true,
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "content",
+              "value": "={{ $json.message.content }}"
+            },
+            {
+              "name": "message_type",
+              "value": "outgoing"
+            },
+            {
+              "name": "private",
+              "value": "false"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "responder",
+      "name": "Responder no Chatwoot",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4.2,
+      "position": [850, 300]
+    }
+  ],
+  "connections": {
+    "webhook": {
+      "main": [
+        [
+          {
+            "node": "processar",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "processar": {
+      "main": [
+        [
+          {
+            "node": "openai",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "openai": {
+      "main": [
+        [
+          {
+            "node": "responder",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "1",
+  "meta": {
+    "instanceId": "orange"
+  },
+  "id": "SDR_IA_01",
+  "tags": []
+}

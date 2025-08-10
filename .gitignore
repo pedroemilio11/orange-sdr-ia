@@ -1,0 +1,62 @@
+# Dependencies
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Environment
+.env
+.env.local
+.env.*.local
+
+# Logs
+logs/
+*.log
+
+# Runtime
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Testing
+coverage/
+.nyc_output
+
+# Build
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+.DS_Store
+
+# Docker
+docker-compose.override.yml
+
+# Credentials
+*.pem
+*.key
+*.cert
+credentials/
+
+# Backups
+*.backup
+backups/
+
+# Temporary
+tmp/
+temp/
+.tmp/
+
+# Redis
+dump.rdb
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
